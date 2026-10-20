@@ -1,0 +1,17 @@
+# Core PyTorch & Diffusers
+torch>=2.1.0
+torchvision
+diffusers>=0.28.0
+transformers>=4.40.0
+accelerate>=0.28.0
+
+# Text Rendering & Image Processing
+Pillow>=10.0.0
+opencv-python>=4.8.0
+uharfbuzz>=0.38.0
+fonttools>=4.47.0
+
+# Utilities & UI
+tqdm>=4.66.0
+pydantic>=2.5.0
+gradio>=4.20.0
