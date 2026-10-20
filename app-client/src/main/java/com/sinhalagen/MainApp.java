@@ -52,15 +52,15 @@ public class MainApp {
             ImageIO.write(payload.glyphImage(), "png", glyphFile);
             ImageIO.write(payload.boxMask(), "png", maskFile);
 
-            System.out.println("✔ Glyph condition saved to: " + glyphFile.getAbsolutePath());
-            System.out.println("✔ Region bounding mask saved to: " + maskFile.getAbsolutePath());
+            System.out.println("[OK] Glyph condition saved to: " + glyphFile.getAbsolutePath());
+            System.out.println("[OK] Region bounding mask saved to: " + maskFile.getAbsolutePath());
 
             if (runInference) {
                 System.out.println("\nConnecting to Python Inference Server (http://127.0.0.1:8000)...");
                 InferenceClient client = new InferenceClient(fontPath);
                 Path outputImg = Paths.get("output", "generated_sinhala_scene.png");
                 client.generateSinhalaScene(samplePrompt, sampleText, outputImg);
-                System.out.println("✔ Scene image generated: " + outputImg.toAbsolutePath());
+                System.out.println("[OK] Scene image generated: " + outputImg.toAbsolutePath());
             } else {
                 System.out.println("\nTip: To run full diffusion inference with the Python engine:");
                 System.out.println("  1. Start the ML engine: ./gradlew startInferenceServer");

@@ -2,7 +2,11 @@ import os
 import json
 import random
 import argparse
-import cv2
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -30,9 +34,10 @@ def get_sinhala_font(font_path: str, font_size: int):
         font_path,
         "ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
         "data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
+        "C:/Windows/Fonts/Nirmala.ttc",
+        "C:/Windows/Fonts/Nirmala.ttf",
         "C:/Windows/Fonts/iskpota.ttf",      # Windows Iskoola Pota
         "C:/Windows/Fonts/iskpotab.ttf",     # Windows Iskoola Pota Bold
-        "C:/Windows/Fonts/Nirmala.ttf",      # Windows Nirmala UI
         "/usr/share/fonts/truetype/noto/NotoSansSinhala-Bold.ttf",
     ]
     for c in candidates:
@@ -74,7 +79,10 @@ def create_sample(idx: int, font: ImageFont.ImageFont, out_dir: str):
 
     # 3. Synthesize Realistic Target Image (textured background + shaded/blended text)
     bg_noise = np.random.randint(30, 95, (img_size, img_size, 3), dtype=np.uint8)
-    bg_img = Image.fromarray(cv2.GaussianBlur(bg_noise, (25, 25), 0))
+    if HAS_CV2:
+        bg_img = Image.fromarray(cv2.GaussianBlur(bg_noise, (25, 25), 0))
+    else:
+        bg_img = Image.fromarray(bg_noise).filter(ImageFilter.GaussianBlur(radius=8))
 
     text_layer = Image.new("RGBA", (img_size, img_size), (0, 0, 0, 0))
     draw_target = ImageDraw.Draw(text_layer)
@@ -131,7 +139,7 @@ def main():
         for entry in metadata:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    print(f"✔ Completed. Saved metadata index to: {meta_file}")
+    print(f"[SUCCESS] Completed. Saved metadata index to: {meta_file}")
 
 if __name__ == "__main__":
     main()

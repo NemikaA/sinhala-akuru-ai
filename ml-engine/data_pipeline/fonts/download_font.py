@@ -11,7 +11,7 @@ def download_font():
     print(f"Downloading NotoSansSinhala-Bold.ttf from Google Fonts repository...")
     try:
         urllib.request.urlretrieve(FONT_URL, TARGET_FILE)
-        print(f"✔ Downloaded font to: {TARGET_FILE}")
+        print(f"[SUCCESS] Downloaded font to: {TARGET_FILE}")
     except Exception as e:
         print(f"Warning: Could not download font automatically ({e}).")
         print("You can place any Sinhala Unicode font (.ttf) here manually or rely on Windows system font (Iskoola Pota).")

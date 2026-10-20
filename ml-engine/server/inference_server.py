@@ -49,7 +49,7 @@ def load_pipeline():
             pipeline.enable_model_cpu_offload()
         else:
             pipeline.to("cpu")
-        print("✔ Sinhala Glyph Diffusion pipeline loaded successfully.")
+        print("[SUCCESS] Sinhala Glyph Diffusion pipeline loaded successfully.")
     except Exception as e:
         print(f"Pipeline loading error: {e}. Running in lightweight mock/fallback mode.")
         pipeline = None

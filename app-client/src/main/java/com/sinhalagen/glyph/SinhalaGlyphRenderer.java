@@ -122,4 +122,35 @@ public class SinhalaGlyphRenderer {
             BufferedImage glyphImage,
             BufferedImage boxMask
     ) {}
+
+    /**
+     * Standalone test entrypoint (requires zero external dependencies).
+     */
+    public static void main(String[] args) {
+        System.out.println("=== Sinhala Glyph HarfBuzz Shaping Engine Test ===");
+        String sampleText = args.length > 0 ? args[0] : "ආයුබෝවන් ශ්‍රී ලංකා";
+        System.out.println("Rendering text: " + sampleText);
+
+        try {
+            SinhalaGlyphRenderer renderer = new SinhalaGlyphRenderer("ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf");
+            Rectangle box = new Rectangle(50, 160, 412, 160);
+            RenderedGlyphPayload payload = renderer.renderGlyphCondition(sampleText, 512, 512, box, 52f);
+
+            File outDir = new File("output");
+            outDir.mkdirs();
+
+            File glyphFile = new File(outDir, "sinhala_glyph_mask.png");
+            File maskFile = new File(outDir, "sinhala_region_box.png");
+            ImageIO.write(payload.glyphImage(), "png", glyphFile);
+            ImageIO.write(payload.boxMask(), "png", maskFile);
+
+            System.out.println("[OK] Successfully generated HarfBuzz glyph mask:");
+            System.out.println("     " + glyphFile.getAbsolutePath());
+            System.out.println("[OK] Successfully generated region bounding box:");
+            System.out.println("     " + maskFile.getAbsolutePath());
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
 }

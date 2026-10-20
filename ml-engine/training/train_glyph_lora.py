@@ -154,7 +154,7 @@ def train(args):
 
     os.makedirs(args.output_dir, exist_ok=True)
     controlnet.save_pretrained(args.output_dir)
-    print(f"✔ Saved trained Sinhala Glyph ControlNet checkpoint to: {args.output_dir}")
+    print(f"[SUCCESS] Saved trained Sinhala Glyph ControlNet checkpoint to: {args.output_dir}")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train ControlNet for Sinhala visual text rendering")
