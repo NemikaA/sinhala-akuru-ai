@@ -22,19 +22,12 @@ public class SinhalaGlyphRenderer {
     private final Font baseFont;
 
     /**
-     * Initializes the renderer with a Unicode font file (e.g. NotoSansSinhala, Iskoola Pota).
+     * Initializes the renderer with a Unicode font file or robust auto-detection fallback.
      *
      * @param fontFilePath Path to TrueType/OpenType font (.ttf / .otf).
-     * @throws Exception If font file loading fails.
      */
-    public SinhalaGlyphRenderer(String fontFilePath) throws Exception {
-        File file = new File(fontFilePath);
-        if (file.exists()) {
-            this.baseFont = Font.createFont(Font.TRUETYPE_FONT, file);
-        } else {
-            // Fallback to a system Sinhala font or generic SansSerif
-            this.baseFont = new Font("Iskoola Pota", Font.PLAIN, 48);
-        }
+    public SinhalaGlyphRenderer(String fontFilePath) {
+        this.baseFont = resolveFont(fontFilePath);
     }
 
     /**
@@ -43,7 +36,52 @@ public class SinhalaGlyphRenderer {
      * @param font Java AWT Font
      */
     public SinhalaGlyphRenderer(Font font) {
-        this.baseFont = font != null ? font : new Font(Font.SANS_SERIF, Font.PLAIN, 48);
+        this.baseFont = font != null ? font : resolveFont(null);
+    }
+
+    /**
+     * Searches multiple paths and system font registries for a font that can render Sinhala.
+     */
+    private static Font resolveFont(String preferredPath) {
+        String[] candidatePaths = {
+                preferredPath,
+                "ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
+                "../ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
+                System.getProperty("user.dir") + "/ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
+                "C:/Windows/Fonts/Nirmala.ttc",
+                "C:/Windows/Fonts/Nirmala.ttf",
+                "C:/Windows/Fonts/iskpota.ttf",
+                "C:/Windows/Fonts/iskpotab.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansSinhala-Bold.ttf"
+        };
+
+        for (String path : candidatePaths) {
+            if (path != null && !path.trim().isEmpty()) {
+                File file = new File(path);
+                if (file.exists()) {
+                    try {
+                        Font f = Font.createFont(Font.TRUETYPE_FONT, file);
+                        System.out.println("[INFO] Loaded font file: " + file.getAbsolutePath());
+                        return f;
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
+
+        // Search system fonts for Sinhala character coverage (e.g. Nirmala UI, Iskoola Pota)
+        GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+        Font[] allFonts = ge.getAllFonts();
+        for (Font f : allFonts) {
+            // Check if font can display Sinhala 'A' (U+0D86)
+            if (f.canDisplay(0x0D86)) {
+                System.out.println("[INFO] Found system Sinhala font: " + f.getFontName());
+                return f.deriveFont(48f);
+            }
+        }
+
+        System.err.println("[WARNING] No Sinhala-capable font found on system! Text may render as tofu boxes.");
+        return new Font(Font.SANS_SERIF, Font.PLAIN, 48);
     }
 
     /**
@@ -125,16 +163,17 @@ public class SinhalaGlyphRenderer {
 
     /**
      * Standalone test entrypoint (requires zero external dependencies).
+     * Uses Unicode escape sequence for "ආයුබෝවන් ශ්‍රී ලංකා" to prevent compiler charset corruption.
      */
     public static void main(String[] args) {
         System.out.println("=== Sinhala Glyph HarfBuzz Shaping Engine Test ===");
-        String sampleText = args.length > 0 ? args[0] : "ආයුබෝවන් ශ්‍රී ලංකා";
-        System.out.println("Rendering text: " + sampleText);
+        // Default: "ආයුබෝවන් ශ්‍රී ලංකා" represented via Unicode escapes to be 100% charset-safe
+        String sampleText = args.length > 0 ? args[0] : "\u0D86\u0DBA\u0DD4\u0DB6\u0DDD\u0DC0\u0DB1\u0DCA \u0DC1\u0DCA\u200D\u0DBB\u0DD3 \u0DBD\u0D82\u0D9A\u0DCF";
 
         try {
             SinhalaGlyphRenderer renderer = new SinhalaGlyphRenderer("ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf");
-            Rectangle box = new Rectangle(50, 160, 412, 160);
-            RenderedGlyphPayload payload = renderer.renderGlyphCondition(sampleText, 512, 512, box, 52f);
+            Rectangle box = new Rectangle(40, 160, 432, 160);
+            RenderedGlyphPayload payload = renderer.renderGlyphCondition(sampleText, 512, 512, box, 48f);
 
             File outDir = new File("output");
             outDir.mkdirs();

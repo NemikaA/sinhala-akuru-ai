@@ -1,11 +1,9 @@
 import io
 import os
 import base64
-import torch
 from PIL import Image, ImageDraw, ImageFont
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
 
 app = FastAPI(
     title="Sinhala Akuru AI - Inference Server",
@@ -14,8 +12,8 @@ app = FastAPI(
 )
 
 pipeline = None
-device = "cuda" if torch.cuda.is_available() else "cpu"
-dtype = torch.float16 if device == "cuda" else torch.float32
+device = "cpu"
+dtype = None
 
 class GenerationRequest(BaseModel):
     scene_prompt: str = Field(..., description="Background scene description in English")
@@ -25,19 +23,26 @@ class GenerationRequest(BaseModel):
 
 @app.on_event("startup")
 def load_pipeline():
-    global pipeline
-    checkpoint_path = "checkpoints/sinhala-glyph-controlnet"
-    base_model = "runwayml/stable-diffusion-v1-5"
-
-    print(f"Loading Sinhala Glyph Pipeline on {device}...")
-    if os.path.exists(checkpoint_path):
-        print(f"Loading custom trained ControlNet checkpoint from {checkpoint_path}...")
-        controlnet = ControlNetModel.from_pretrained(checkpoint_path, torch_dtype=dtype)
-    else:
-        print(f"Warning: {checkpoint_path} not found. Initializing with default ControlNet for testing...")
-        controlnet = ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-canny", torch_dtype=dtype)
+    global pipeline, device, dtype
+    print("[INFO] Initializing Sinhala Akuru AI Inference Server...")
 
     try:
+        import torch
+        from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype = torch.float16 if device == "cuda" else torch.float32
+        checkpoint_path = "checkpoints/sinhala-glyph-controlnet"
+        base_model = "runwayml/stable-diffusion-v1-5"
+
+        print(f"[INFO] PyTorch detected (device: {device}). Checking checkpoints...")
+        if os.path.exists(checkpoint_path):
+            print(f"[INFO] Loading custom ControlNet from {checkpoint_path}...")
+            controlnet = ControlNetModel.from_pretrained(checkpoint_path, torch_dtype=dtype)
+        else:
+            print("[INFO] No custom trained checkpoint found yet. Loading base ControlNet...")
+            controlnet = ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-canny", torch_dtype=dtype)
+
         pipeline = StableDiffusionControlNetPipeline.from_pretrained(
             base_model,
             controlnet=controlnet,
@@ -49,17 +54,31 @@ def load_pipeline():
             pipeline.enable_model_cpu_offload()
         else:
             pipeline.to("cpu")
-        print("[SUCCESS] Sinhala Glyph Diffusion pipeline loaded successfully.")
-    except Exception as e:
-        print(f"Pipeline loading error: {e}. Running in lightweight mock/fallback mode.")
+        print("[SUCCESS] Full Sinhala Glyph Diffusion pipeline loaded successfully.")
+
+    except ImportError as e:
+        print(f"[NOTE] Deep learning libraries not installed ({e}).")
+        print("       Server will run in Preview / Testing Mode.")
         pipeline = None
+    except Exception as e:
+        print(f"[NOTE] Pipeline initialization info: {e}")
+        print("       Server is running in Preview Mode.")
+        pipeline = None
+
+@app.get("/")
+def root():
+    return {
+        "message": "Sinhala Akuru AI Inference Server is running",
+        "docs_url": "/docs",
+        "health_url": "/health"
+    }
 
 @app.get("/health")
 def health_check():
     return {
         "status": "healthy",
         "device": device,
-        "pipeline_loaded": pipeline is not None
+        "mode": "full_diffusion" if pipeline is not None else "preview_mode"
     }
 
 @app.post("/generate")
@@ -81,14 +100,27 @@ def generate_image(req: GenerationRequest):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Diffusion inference failure: {str(e)}")
     else:
-        # Fallback preview mode when running without full weights/GPU
-        output = Image.new("RGB", (512, 512), (40, 44, 52))
+        # Realistic preview composite mode when testing without full GPU weights
+        img_size = glyph_image.size
+        # Create atmospheric background
+        output = Image.new("RGB", img_size, (28, 32, 40))
         draw = ImageDraw.Draw(output)
-        draw.text((20, 20), "Sinhala Akuru AI (Preview Mode)", fill=(255, 215, 0))
-        draw.text((20, 50), f"Prompt: {req.scene_prompt[:45]}...", fill=(200, 200, 200))
-        # Blend glyph image over canvas
-        blended = Image.blend(output, glyph_image, alpha=0.6)
-        output = blended
+
+        # Draw decorative banner header
+        draw.rectangle([0, 0, img_size[0], 50], fill=(20, 24, 30))
+        draw.text((15, 15), "[Sinhala Akuru AI - Preview Composite]", fill=(255, 215, 0))
+
+        # Composite the glyph mask with warm golden glow
+        tinted_glyph = Image.new("RGB", img_size, (0, 0, 0))
+        # Where glyph is white, tint it gold/cyan
+        glyph_gray = glyph_image.convert("L")
+        gold_color = Image.new("RGB", img_size, (255, 220, 100))
+        tinted_glyph.paste(gold_color, mask=glyph_gray)
+
+        # Blend
+        output = Image.blend(output, tinted_glyph, alpha=0.85)
+        draw = ImageDraw.Draw(output)
+        draw.text((15, img_size[1] - 35), f"Scene: {req.scene_prompt[:50]}", fill=(180, 190, 205))
 
     buf = io.BytesIO()
     output.save(buf, format="PNG")
@@ -97,5 +129,6 @@ def generate_image(req: GenerationRequest):
     return {
         "status": "success",
         "scene_prompt": req.scene_prompt,
+        "mode": "diffusion" if pipeline is not None else "preview",
         "generated_image_base64": b64_str
     }
