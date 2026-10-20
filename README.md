@@ -1,58 +1,190 @@
 # Sinhala Akuru AI (සිංහල අකුරු AI) 🇱🇰✨
 
-Fixing and enhancing **Sinhala visual text and glyph generation** in modern AI image generation models (Diffusion models, FLUX, SDXL, etc.).
+**Sinhala Akuru AI** is an end-to-end framework and pipeline for generating photo-realistic images with accurate, legible **Sinhala typography (සිංහල අක්ෂර)** using a **Glyph-Conditioned ControlNet + LoRA** architecture with **Region-Weighted Loss** and deterministic **HarfBuzz text shaping**.
 
 ---
 
 ## 🎯 Problem Statement
 
-Most modern text-to-image models (Stable Diffusion, FLUX, Midjourney, DALL-E) struggle significantly with complex Brahmic and Indic scripts—particularly **Sinhala (සිංහල)**. 
+Standard text-to-image diffusion models (Stable Diffusion, FLUX, Midjourney, DALL-E) consistently fail when generating Sinhala script due to two fundamental architectural hurdles:
 
-Common issues include:
-- **Glyph Distortion:** Incorrect curves, loops, and disconnected strokes.
-- **Diacritics & Modifiers (පිල්ලම් / Pillam):** Misplaced or missing Kombuwa (ෙ), Aeda (ැ/ෑ), Al-lakuna (්), Ispilla (ි/ී), and Papilla (ු/ූ).
-- **Ligatures & Consonant Conjuncts (බැඳි අකුරු / Bandi Akuru):** Failure to render complex conjuncts properly.
-- **Vowel Signs Ordering:** Spatial positioning of left-side vowel signs (like Kombuwa) placed after the consonant.
+1. **Tokenizer Fragmentation:** Byte-Pair Encoding (BPE) tokenizers split Sinhala Unicode code points (`U+0D80` to `U+0DFF`) into fragmented byte sequences without semantic typographic understanding.
+2. **Complex Text Layout (CTL) Blindness:** Sinhala is an abugida where visual glyph ordering differs from logical Unicode memory order:
+   - **Kombuwa (ෙ):** Stored after the consonant in memory, but must be rendered *before* it visually (e.g. `ක` + `ෙ` $\rightarrow$ `කෙ`).
+   - **Diacritics & Pillam:** Vowel signs (Ispilla `ි/ී`, Papilla `ු/ූ`, Aeda `ැ/ෑ`, Hal-lakuna `්`) attach dynamically above, below, or beside glyphs.
+   - **Ligatures & Conjuncts (බැඳි අකුරු):** Conjuncts such as *Rakaransaya* (e.g. `ක්‍ර`) and *Yansaya* (e.g. `ද්‍ය`) require Zero-Width Joiner (`U+200D`) ligature substitution.
 
----
-
-## 🚀 Objectives
-
-1. **Sinhala Glyph Conditioning Pipeline:** Provide glyph-aware conditioning mechanisms (e.g., ControlNet, Glyph-By-T5, AnyText adaptation) for Sinhala typography.
-2. **Dataset & Benchmark:** Build a curated dataset of Sinhala font renderings, synthetic signs, banners, and typographic compositions with exact bounding box & character annotations.
-3. **Fine-Tuning / LoRA Weights:** Train LoRA adapters and fine-tuned checkpoints specifically for Sinhala visual text synthesis.
-4. **Interactive Studio / API:** A lightweight UI or pipeline interface for generating images containing verified, legible Sinhala text.
+Without deterministic shaping, generative models hallucinate broken squiggles.
 
 ---
 
-## 📂 Project Structure
+## 🧠 Solution Architecture
+
+Instead of retraining a billion-parameter foundation model from scratch, **Sinhala Akuru AI** uses a two-tier hybrid architecture:
+
+```
+[User Sinhala Text] + [Target Box]
+          │
+          ▼
+┌─────────────────────────────────────────┐
+│ Java Client (Native HarfBuzz Engine)   │
+│  - java.awt.font.TextLayout             │
+│  - Deterministic Unicode Ligature Shape │
+└──────────────────┬──────────────────────┘
+                   │ Base64 Payloads
+       ┌───────────┴───────────┐
+       ▼                       ▼
+┌──────────────┐       ┌──────────────┐
+│ Glyph Mask   │       │ Region Mask  │
+│ (White/Black)│       │ (Latent BBox)│
+└──────┬───────┘       └──────┬───────┘
+       │                      │
+       ▼                      ▼
+┌─────────────────────────────────────────┐
+│ Python ML Engine (PyTorch / FastAPI)    │
+│  - ControlNet Spatial Conditioning      │
+│  - Base Model: Stable Diffusion v1.5    │
+│  - Region-Weighted Loss (λ = 5.0)       │
+└──────────────────┬──────────────────────┘
+                   │
+                   ▼
+       [Generated Scene Image]
+```
+
+### 1. Deterministic HarfBuzz Text Shaping
+Java's `java.awt.font.TextLayout` leverages the native **HarfBuzz** shaping engine, guaranteeing 100% accurate rendering of vowel diacritics and ligatures without guessing.
+
+### 2. Region-Weighted Diffusion Loss
+Because Sinhala diacritics (like *Al-lakuna* `්` or *Ispilla* `ි`) occupy only a small fraction of pixels in a 512×512 image, standard mean-squared error loss tends to smooth them away. We supervise the network with an amplified loss inside the text bounding box $M$:
+
+$$\mathcal{L}_{\text{total}} = \mathbb{E}_{z_0, t, c_{\text{prompt}}, c_{\text{glyph}}, \epsilon} \left[ \left\| (1 + \lambda \cdot M) \odot (\epsilon - \epsilon_\theta(z_t, t, c_{\text{prompt}}, c_{\text{glyph}})) \right\|_2^2 \right]$$
+
+where $\lambda = 5.0$ applies $5\times$ sharper supervision inside the Sinhala typographic region.
+
+---
+
+## 📂 Repository Structure
+
+This repository is organized as a multi-module project orchestrated with Gradle:
 
 ```text
 sinhala-akuru-ai/
-├── data/              # Dataset collection, glyph rendering, annotations
-│   ├── fonts/         # Open-source Sinhala Unicode fonts
-│   └── raw/           # Raw imagery & text pairings
-├── src/               # Core source code
-│   ├── rendering/     # Glyph / PIL / HarfBuzz text rendering utilities
-│   ├── dataset/       # Data loaders and synthetic text generators
-│   ├── models/        # Model definitions, ControlNet / LoRA pipelines
-│   └── utils/         # Helper functions and text validation
-├── notebooks/         # Exploratory data analysis and experiments
-├── configs/           # Training and inference configurations
-├── requirements.txt   # Python dependencies
-└── README.md
+├── build.gradle                          # Root Gradle orchestration (Java + Python tasks)
+├── settings.gradle                       # Gradle project settings
+├── app-client/                           # Java 21 Client Module
+│   ├── build.gradle                      # Java application dependencies & plugins
+│   └── src/
+│       ├── main/java/com/sinhalagen/
+│       │   ├── MainApp.java              # Client entrypoint & verification
+│       │   ├── glyph/
+│       │   │   └── SinhalaGlyphRenderer.java  # HarfBuzz TextLayout mask generator
+│       │   └── client/
+│       │       └── InferenceClient.java       # HTTP REST client to Python engine
+│       └── test/java/com/sinhalagen/
+│           └── glyph/
+│               └── SinhalaGlyphRendererTest.java  # Unit tests for complex conjuncts
+└── ml-engine/                            # Python PyTorch & FastAPI Engine
+    ├── requirements.txt                  # Python dependencies
+    ├── data_pipeline/
+    │   ├── fonts/                        # Unicode Sinhala TrueType fonts
+    │   │   └── download_font.py          # Font downloader utility
+    │   └── generate_synthetic_data.py    # Paired dataset generator (Glyph, Target, Mask)
+    ├── training/
+    │   └── train_glyph_lora.py           # ControlNet training with region-weighted loss
+    └── server/
+        └── inference_server.py           # FastAPI service exposing /generate endpoint
 ```
 
 ---
 
-## 🛠️ Quickstart (Coming Soon)
+## 🚀 Quickstart & Workflow
 
-### Installation
+### Prerequisites
+- **Java Development Kit (JDK 21 or later)**
+- **Python 3.10+** (with PyTorch and CUDA support if training/inferring with GPU)
+- **Gradle 8+** (or system wrapper)
+
+---
+
+### Step 1: Set Up Python ML Environment
+Install required PyTorch, Diffusers, and FastAPI libraries:
 ```bash
-git clone https://github.com/NemikaA/sinhala-akuru-ai.git
-cd sinhala-akuru-ai
-pip install -r requirements.txt
+./gradlew setupMlEnv
+# or manually:
+cd ml-engine && pip install -r requirements.txt
 ```
+
+To fetch the reference open-source font (`NotoSansSinhala-Bold.ttf`):
+```bash
+python ml-engine/data_pipeline/fonts/download_font.py
+```
+
+---
+
+### Step 2: Generate Paired Synthetic Dataset
+Generate synthetic pairs consisting of:
+1. `glyphs/` (White-on-black glyph condition map)
+2. `masks/` (Bounding box region mask)
+3. `targets/` (Realistic background with composite shaded Sinhala text)
+4. `metadata.jsonl`
+
+```bash
+./gradlew generateDataset
+# or with custom sample count:
+python ml-engine/data_pipeline/generate_synthetic_data.py --samples 5000 --out_dir dataset
+```
+
+---
+
+### Step 3: Train ControlNet Model
+Train the Sinhala glyph conditioning adapter using region-weighted loss:
+```bash
+./gradlew trainModel
+# or directly:
+python ml-engine/training/train_glyph_lora.py --epochs 5 --batch_size 1 --region_weight_lambda 5.0
+```
+Trained weights will be saved to `checkpoints/sinhala-glyph-controlnet`.
+
+---
+
+### Step 4: Run the Inference Server
+Launch the FastAPI server on `http://127.0.0.1:8000`:
+```bash
+./gradlew startInferenceServer
+```
+
+Interactive API documentation will be accessible at:
+- Swagger UI: `http://127.0.0.1:8000/docs`
+- Health check: `http://127.0.0.1:8000/health`
+
+---
+
+### Step 5: Test & Run via Java Client
+Generate test glyph condition masks directly using Java HarfBuzz:
+```bash
+./gradlew run
+```
+
+Send an end-to-end inference request to the server:
+```bash
+./gradlew run --args="--infer"
+```
+
+To run unit tests verifying complex Sinhala conjuncts:
+```bash
+./gradlew test
+```
+
+---
+
+## 🗺️ Roadmap & Milestones
+
+| Milestone | Deliverable | Validation Metric |
+| :--- | :--- | :--- |
+| **Step 1: HarfBuzz Verification** | `SinhalaGlyphRenderer` with complex ligatures (ශ්‍රී, ක්‍ර, ෞ, ෙ). | Zero detached kombuwa or broken Unicode rings on mask PNG. |
+| **Step 2: Synthetic Dataset** | 10,000+ pairs using 5–8 Unicode Sinhala fonts and background scenes. | Visual check of perspective-warped Sinhala signage blended onto photos. |
+| **Step 3: ControlNet + Region Loss** | Training at 512×512 using fp16 and $\lambda = 5.0$ box weighting. | Character Error Rate (CER) measured with Tesseract OCR (`sin.traineddata`). |
+| **Step 4: Interactive Studio** | JavaFX canvas allowing user to draw a text bounding box and enter prompt. | End-to-end latency < 6s per image. |
 
 ---
 

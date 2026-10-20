@@ -1,0 +1,17 @@
+# Deep Learning & Diffusion
+torch>=2.1.0
+torchvision
+diffusers>=0.28.0
+transformers>=4.40.0
+accelerate>=0.28.0
+
+# Image Processing & Text Layout
+Pillow>=10.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Inference Server & API
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic>=2.5.0
+tqdm>=4.66.0

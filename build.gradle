@@ -1,0 +1,57 @@
+plugins {
+    id 'base'
+}
+
+allprojects {
+    group = 'com.sinhalagen'
+    version = '1.0.0'
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+// Custom Gradle tasks to manage the Python ML pipeline
+tasks.register('setupMlEnv', Exec) {
+    description = 'Installs Python ML dependencies from requirements.txt'
+    group = 'ml-engine'
+    workingDir 'ml-engine'
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', 'python -m pip install -r requirements.txt'
+    } else {
+        commandLine 'python3', '-m', 'pip', 'install', '-r', 'requirements.txt'
+    }
+}
+
+tasks.register('generateDataset', Exec) {
+    description = 'Generates paired synthetic dataset (GlyphMask, TargetImage, RegionMask, Prompt)'
+    group = 'ml-engine'
+    workingDir 'ml-engine'
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', 'python data_pipeline/generate_synthetic_data.py'
+    } else {
+        commandLine 'python3', 'data_pipeline/generate_synthetic_data.py'
+    }
+}
+
+tasks.register('trainModel', Exec) {
+    description = 'Trains the Sinhala Glyph ControlNet with Region-Weighted Loss'
+    group = 'ml-engine'
+    workingDir 'ml-engine'
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', 'python training/train_glyph_lora.py'
+    } else {
+        commandLine 'python3', 'training/train_glyph_lora.py'
+    }
+}
+
+tasks.register('startInferenceServer', Exec) {
+    description = 'Launches FastAPI inference server on port 8000'
+    group = 'ml-engine'
+    workingDir 'ml-engine'
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', 'uvicorn server.inference_server:app --host 127.0.0.1 --port 8000 --reload'
+    } else {
+        commandLine 'uvicorn', 'server.inference_server:app', '--host', '127.0.0.1', '--port', '8000', '--reload'
+    }
+}
