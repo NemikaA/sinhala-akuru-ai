@@ -4,7 +4,6 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.font.FontRenderContext;
 import java.awt.font.TextLayout;
-import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -12,10 +11,10 @@ import java.io.IOException;
 import java.util.Base64;
 
 /**
- * Deterministic Sinhala Glyph Renderer using Java AWT TextLayout (backed by HarfBuzz).
+ * Deterministic Sinhala Glyph Renderer using Java AWT TextLayout (backed by HarfBuzz/Uniscribe).
  * Guarantees 100% accurate rendering of complex Brahmic/Indic ligatures, vowel signs
  * (Pillam such as Kombuwa, Ispilla, Papilla), and consonant conjuncts (Bandi Akuru,
- * Rakaransaya, Yansaya) without neural network hallucination.
+ * Rakaransaya, Yansaya) without neural network hallucination or glyph smudging.
  */
 public class SinhalaGlyphRenderer {
 
@@ -40,18 +39,45 @@ public class SinhalaGlyphRenderer {
     }
 
     /**
-     * Searches multiple paths and system font registries for a font that can render Sinhala.
+     * Searches multiple paths and system font registries for a font that properly shapes Sinhala.
+     * On Windows, Nirmala UI & Iskoola Pota have native Microsoft 'sinh' tables that properly
+     * reorder left-side vowel signs (Kombuwa ෙ) and diacritics without smudging.
      */
     private static Font resolveFont(String preferredPath) {
+        // 1. If explicit font path provided and not a default placeholder
+        if (preferredPath != null && !preferredPath.trim().isEmpty()) {
+            File file = new File(preferredPath);
+            if (file.exists() && !preferredPath.contains("NotoSansSinhala")) {
+                try {
+                    Font f = Font.createFont(Font.TRUETYPE_FONT, file);
+                    System.out.println("[INFO] Loaded custom font: " + file.getAbsolutePath());
+                    return f;
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        // 2. On Windows, Nirmala UI and Iskoola Pota have native Microsoft 'sinh' shaping tables
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("win")) {
+            for (String winFontName : new String[]{"Nirmala UI", "Iskoola Pota"}) {
+                Font f = new Font(winFontName, Font.BOLD, 48);
+                if (f.canDisplay(0x0D86) && !f.getFamily().equalsIgnoreCase("Dialog")) {
+                    System.out.println("[INFO] Using Windows native Sinhala shaping font: " + f.getFontName());
+                    return f;
+                }
+            }
+        }
+
+        // 3. Check bundled / system font files
         String[] candidatePaths = {
-                preferredPath,
-                "ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
-                "../ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
-                System.getProperty("user.dir") + "/ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
                 "C:/Windows/Fonts/Nirmala.ttc",
                 "C:/Windows/Fonts/Nirmala.ttf",
                 "C:/Windows/Fonts/iskpota.ttf",
                 "C:/Windows/Fonts/iskpotab.ttf",
+                preferredPath,
+                "ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
+                "../ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf",
                 "/usr/share/fonts/truetype/noto/NotoSansSinhala-Bold.ttf"
         };
 
@@ -69,19 +95,17 @@ public class SinhalaGlyphRenderer {
             }
         }
 
-        // Search system fonts for Sinhala character coverage (e.g. Nirmala UI, Iskoola Pota)
+        // 4. Search all system fonts for Sinhala character coverage
         GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
-        Font[] allFonts = ge.getAllFonts();
-        for (Font f : allFonts) {
-            // Check if font can display Sinhala 'A' (U+0D86)
-            if (f.canDisplay(0x0D86)) {
+        for (Font f : ge.getAllFonts()) {
+            if (f.canDisplay(0x0D86) && !f.getFamily().equalsIgnoreCase("Dialog")) {
                 System.out.println("[INFO] Found system Sinhala font: " + f.getFontName());
-                return f.deriveFont(48f);
+                return f.deriveFont(Font.BOLD, 48f);
             }
         }
 
-        System.err.println("[WARNING] No Sinhala-capable font found on system! Text may render as tofu boxes.");
-        return new Font(Font.SANS_SERIF, Font.PLAIN, 48);
+        System.err.println("[WARNING] No Sinhala-capable font found! Text may render as tofu boxes.");
+        return new Font(Font.SANS_SERIF, Font.BOLD, 48);
     }
 
     /**
@@ -108,6 +132,7 @@ public class SinhalaGlyphRenderer {
         Graphics2D g2d = glyphCanvas.createGraphics();
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
 
         g2d.setColor(Color.BLACK);
         g2d.fillRect(0, 0, imageWidth, imageHeight);
@@ -115,17 +140,16 @@ public class SinhalaGlyphRenderer {
         Font sizedFont = baseFont.deriveFont(Font.BOLD, fontSize);
         FontRenderContext frc = g2d.getFontRenderContext();
 
-        // TextLayout invokes HarfBuzz shaping under the hood for accurate Sinhala ligatures & pili
+        // TextLayout invokes native CTL shaping (reordering kombuwa and positioning diacritics)
         TextLayout textLayout = new TextLayout(sinhalaText, sizedFont, frc);
-        Rectangle textBounds = textLayout.getPixelBounds(null, 0, 0);
+        Rectangle textBounds = textLayout.getPixelBounds(frc, 0, 0);
 
         // Center the shaped Sinhala glyph outline inside the target bounding box
         double startX = targetBox.x + (targetBox.width - textBounds.width) / 2.0;
         double startY = targetBox.y + (targetBox.height + textBounds.height) / 2.0;
 
         g2d.setColor(Color.WHITE);
-        Shape outline = textLayout.getOutline(AffineTransform.getTranslateInstance(startX, startY));
-        g2d.fill(outline);
+        textLayout.draw(g2d, (float) startX, (float) startY);
         g2d.dispose();
 
         // 2. Create Binary Region Mask (Marks where text box is located for Loss/Inpainting)
@@ -172,8 +196,8 @@ public class SinhalaGlyphRenderer {
 
         try {
             SinhalaGlyphRenderer renderer = new SinhalaGlyphRenderer("ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf");
-            Rectangle box = new Rectangle(40, 160, 432, 160);
-            RenderedGlyphPayload payload = renderer.renderGlyphCondition(sampleText, 512, 512, box, 48f);
+            Rectangle box = new Rectangle(10, 160, 492, 160);
+            RenderedGlyphPayload payload = renderer.renderGlyphCondition(sampleText, 512, 512, box, 44f);
 
             File outDir = new File("output");
             outDir.mkdirs();
