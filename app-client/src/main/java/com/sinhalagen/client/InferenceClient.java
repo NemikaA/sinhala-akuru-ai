@@ -14,10 +14,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
  * Java client for communicating with the Python FastAPI Sinhala Glyph Inference Server.
+ * Supports inserting stylized Sinhala text onto ANY user-provided image while keeping
+ * the base image completely intact.
  */
 public class InferenceClient {
 
@@ -40,39 +43,90 @@ public class InferenceClient {
     }
 
     /**
-     * Renders Sinhala text into a glyph mask and sends it along with the prompt to the ML server.
+     * Inserts accurate, stylized Sinhala text onto an existing image while keeping
+     * every other pixel of the image completely intact.
      *
-     * @param scenePrompt  English background/scene description (e.g., "A glowing neon sign in Colombo night rain")
-     * @param sinhalaText  Sinhala Unicode string to render
-     * @param outputPath   Output path for the generated image PNG
-     * @throws Exception If rendering or network inference fails
+     * @param inputImagePath  Path to the user's base photo
+     * @param sinhalaText     Sinhala text to render (e.g. "ආයුබෝවන්", "සිංහල තේ කඩේ")
+     * @param targetBox       Optional bounding box placement (can be null for auto-center)
+     * @param style           Style preset (e.g. "wood_carved", "neon_glow", "metallic_gold", "painted_sign", "chalk")
+     * @param colorHex        Optional custom hex color (e.g. "#00FFFF", or null)
+     * @param outputPath      Path to save the modified image
      */
-    public void generateSinhalaScene(String scenePrompt, String sinhalaText, Path outputPath) throws Exception {
-        Rectangle defaultBox = new Rectangle(60, 180, 392, 140);
-        generateSinhalaScene(scenePrompt, sinhalaText, defaultBox, 56f, 1.15, 25, outputPath);
+    public void insertSinhalaTextIntoImage(
+            Path inputImagePath,
+            String sinhalaText,
+            Rectangle targetBox,
+            String style,
+            String colorHex,
+            Path outputPath) throws Exception {
+
+        if (!Files.exists(inputImagePath)) {
+            throw new IOException("Input image does not exist: " + inputImagePath.toAbsolutePath());
+        }
+
+        // 1. Read input image and encode to Base64
+        byte[] inputImageBytes = Files.readAllBytes(inputImagePath);
+        String baseImageBase64 = Base64.getEncoder().encodeToString(inputImageBytes);
+
+        // 2. Render deterministic Sinhala glyph layout via HarfBuzz / Uniscribe
+        Rectangle renderBox = targetBox != null ? targetBox : new Rectangle(20, 160, 472, 160);
+        var payload = renderer.renderGlyphCondition(sinhalaText, 512, 512, renderBox, 48f);
+
+        // 3. Build JSON payload
+        Map<String, Object> reqMap = new HashMap<>();
+        reqMap.put("glyph_mask_base64", payload.glyphImageBase64());
+        reqMap.put("base_image_base64", baseImageBase64);
+        reqMap.put("style", style != null ? style : "wood_carved");
+        if (colorHex != null) {
+            reqMap.put("color_hex", colorHex);
+        }
+        if (targetBox != null) {
+            reqMap.put("box_x", targetBox.x);
+            reqMap.put("box_y", targetBox.y);
+            reqMap.put("box_w", targetBox.width);
+            reqMap.put("box_h", targetBox.height);
+        }
+
+        String requestBody = mapper.writeValueAsString(reqMap);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(serverUrl + "/generate"))
+                .timeout(Duration.ofMinutes(1))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            throw new IOException("Server error (" + response.statusCode() + "): " + response.body());
+        }
+
+        JsonNode root = mapper.readTree(response.body());
+        byte[] imageBytes = Base64.getDecoder().decode(root.get("generated_image_base64").asText());
+
+        if (outputPath.getParent() != null) {
+            Files.createDirectories(outputPath.getParent());
+        }
+        Files.write(outputPath, imageBytes);
+        System.out.println("[OK] Successfully generated intact image with stylized Sinhala text:");
+        System.out.println("     " + outputPath.toAbsolutePath());
     }
 
     /**
-     * Full configuration generation call.
+     * Standalone scene generation without base image.
      */
-    public void generateSinhalaScene(
-            String scenePrompt,
-            String sinhalaText,
-            Rectangle textBox,
-            float fontSize,
-            double controlnetScale,
-            int steps,
-            Path outputPath) throws Exception {
+    public void generateSinhalaScene(String scenePrompt, String sinhalaText, Path outputPath) throws Exception {
+        Rectangle defaultBox = new Rectangle(50, 180, 412, 140);
+        var payload = renderer.renderGlyphCondition(sinhalaText, 512, 512, defaultBox, 48f);
 
-        // 1. Render exact Sinhala glyph layout via HarfBuzz-backed TextLayout
-        var payload = renderer.renderGlyphCondition(sinhalaText, 512, 512, textBox, fontSize);
-
-        // 2. Build JSON payload for FastAPI server
         String requestBody = mapper.writeValueAsString(Map.of(
                 "scene_prompt", scenePrompt,
                 "glyph_mask_base64", payload.glyphImageBase64(),
-                "controlnet_scale", controlnetScale,
-                "steps", steps
+                "style", "metallic_gold",
+                "controlnet_scale", 1.15,
+                "steps", 25
         ));
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -83,19 +137,17 @@ public class InferenceClient {
                 .build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
         if (response.statusCode() != 200) {
-            throw new IOException("Inference server error (" + response.statusCode() + "): " + response.body());
+            throw new IOException("Server error (" + response.statusCode() + "): " + response.body());
         }
 
         JsonNode root = mapper.readTree(response.body());
         byte[] imageBytes = Base64.getDecoder().decode(root.get("generated_image_base64").asText());
-
         if (outputPath.getParent() != null) {
             Files.createDirectories(outputPath.getParent());
         }
         Files.write(outputPath, imageBytes);
-        System.out.println("Saved generated Sinhala scene image to: " + outputPath.toAbsolutePath());
+        System.out.println("[OK] Scene generated to: " + outputPath.toAbsolutePath());
     }
 
     public SinhalaGlyphRenderer getRenderer() {

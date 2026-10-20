@@ -4,67 +4,81 @@ import com.sinhalagen.client.InferenceClient;
 import com.sinhalagen.glyph.SinhalaGlyphRenderer;
 
 import javax.imageio.ImageIO;
-import java.awt.Rectangle;
+import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Main application entrypoint for Sinhala Akuru AI Java client.
+ * Main application entrypoint for Sinhala Akuru AI.
+ * Demonstrates inserting stylized Sinhala text onto ANY image while leaving
+ * the background image 100% intact.
  */
 public class MainApp {
 
     public static void main(String[] args) {
-        System.out.println("==================================================");
-        System.out.println("  Sinhala Akuru AI (සිංහල අකුරු AI) Client");
-        System.out.println("  Accurate Sinhala Visual Glyph Synthesis Pipeline");
-        System.out.println("==================================================");
+        System.out.println("==========================================================");
+        System.out.println("  Sinhala Akuru AI - Visual Text Inpainting & Styling");
+        System.out.println("  Paints stylized Sinhala text onto ANY intact image");
+        System.out.println("==========================================================");
 
-        String sampleText = "ආයුබෝවන්";
-        String samplePrompt = "a vintage wooden signboard hanging outside a traditional Sri Lankan shop in Colombo, warm evening sunlight";
+        String sampleText = "\u0D86\u0DBA\u0DD4\u0DB6\u0DDD\u0DC0\u0DB1\u0DCA \u0DC1\u0DCA\u200D\u0DBB\u0DD3 \u0DBD\u0D82\u0D9A\u0DCF";
         String fontPath = "ml-engine/data_pipeline/fonts/NotoSansSinhala-Bold.ttf";
-
-        if (args.length > 0 && "--help".equalsIgnoreCase(args[0])) {
-            printHelp();
-            return;
-        }
-
+        String chosenStyle = "neon_glow";
+        String inputImagePath = null;
         boolean runInference = false;
-        for (String arg : args) {
-            if ("--infer".equalsIgnoreCase(arg)) {
+
+        for (int i = 0; i < args.length; i++) {
+            if ("--text".equalsIgnoreCase(args[i]) && i + 1 < args.length) {
+                sampleText = args[++i];
+            } else if ("--style".equalsIgnoreCase(args[i]) && i + 1 < args.length) {
+                chosenStyle = args[++i];
+            } else if ("--image".equalsIgnoreCase(args[i]) && i + 1 < args.length) {
+                inputImagePath = args[++i];
+                runInference = true;
+            } else if ("--infer".equalsIgnoreCase(args[i])) {
                 runInference = true;
             }
         }
 
         try {
-            System.out.println("[1/2] Initializing Sinhala Glyph Renderer (HarfBuzz)...");
-            SinhalaGlyphRenderer renderer = new SinhalaGlyphRenderer(fontPath);
-
-            System.out.println("[2/2] Rendering sample glyph for: \"" + sampleText + "\"");
-            Rectangle box = new Rectangle(56, 176, 400, 160);
-            var payload = renderer.renderGlyphCondition(sampleText, 512, 512, box, 64f);
-
             File outDir = new File("output");
             outDir.mkdirs();
 
-            File glyphFile = new File(outDir, "test_glyph_mask.png");
-            File maskFile = new File(outDir, "test_region_box.png");
-            ImageIO.write(payload.glyphImage(), "png", glyphFile);
-            ImageIO.write(payload.boxMask(), "png", maskFile);
-
-            System.out.println("[OK] Glyph condition saved to: " + glyphFile.getAbsolutePath());
-            System.out.println("[OK] Region bounding mask saved to: " + maskFile.getAbsolutePath());
-
-            if (runInference) {
-                System.out.println("\nConnecting to Python Inference Server (http://127.0.0.1:8000)...");
-                InferenceClient client = new InferenceClient(fontPath);
-                Path outputImg = Paths.get("output", "generated_sinhala_scene.png");
-                client.generateSinhalaScene(samplePrompt, sampleText, outputImg);
-                System.out.println("[OK] Scene image generated: " + outputImg.toAbsolutePath());
+            // 1. If no image was provided, create a sample background photo (e.g. wall/signboard)
+            File baseImageFile;
+            if (inputImagePath != null) {
+                baseImageFile = new File(inputImagePath);
             } else {
-                System.out.println("\nTip: To run full diffusion inference with the Python engine:");
-                System.out.println("  1. Start the ML engine: ./gradlew startInferenceServer");
-                System.out.println("  2. Run inference: ./gradlew run --args=\"--infer\"");
+                baseImageFile = new File(outDir, "sample_storefront_wall.png");
+                createSamplePhoto(baseImageFile);
+                System.out.println("[INFO] Created sample background image at: " + baseImageFile.getAbsolutePath());
+            }
+
+            // 2. Generate crisp glyph mask via HarfBuzz
+            System.out.println("[1/2] Generating accurate Sinhala glyph mask for: \"" + sampleText + "\"");
+            SinhalaGlyphRenderer renderer = new SinhalaGlyphRenderer(fontPath);
+            Rectangle box = new Rectangle(20, 160, 472, 160);
+            var payload = renderer.renderGlyphCondition(sampleText, 512, 512, box, 44f);
+
+            File glyphFile = new File(outDir, "sinhala_glyph_mask.png");
+            ImageIO.write(payload.glyphImage(), "png", glyphFile);
+            System.out.println("[OK] Glyph mask ready: " + glyphFile.getAbsolutePath());
+
+            // 3. Connect to inference server to apply stylized text while keeping base image intact
+            if (runInference) {
+                System.out.println("[2/2] Inpainting stylized Sinhala text ('" + chosenStyle + "') onto base photo...");
+                InferenceClient client = new InferenceClient(fontPath);
+                Path outputImg = Paths.get("output", "intact_result_" + chosenStyle + ".png");
+                client.insertSinhalaTextIntoImage(baseImageFile.toPath(), sampleText, null, chosenStyle, null, outputImg);
+                System.out.println("\n[SUCCESS] Intact image with stylized Sinhala text saved to:");
+                System.out.println("          " + outputImg.toAbsolutePath());
+            } else {
+                System.out.println("\nTip: Start the server and run full intact image inpainting with:");
+                System.out.println("  1. In terminal 1: py -m uvicorn server.inference_server:app --port 8000 (inside ml-engine)");
+                System.out.println("  2. In terminal 2: ./gradlew run --args=\"--infer --style neon_glow\"");
+                System.out.println("  (Styles: neon_glow, wood_carved, metallic_gold, painted_sign, chalk)");
             }
 
         } catch (Exception e) {
@@ -73,9 +87,23 @@ public class MainApp {
         }
     }
 
-    private static void printHelp() {
-        System.out.println("Usage:");
-        System.out.println("  ./gradlew run                  # Generates glyph & mask preview PNGs");
-        System.out.println("  ./gradlew run --args=\"--infer\"  # Calls FastAPI inference server to generate scene");
+    private static void createSamplePhoto(File targetFile) throws Exception {
+        BufferedImage img = new BufferedImage(700, 450, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+
+        // Draw wooden / architectural textures
+        for (int y = 0; y < 450; y += 4) {
+            int tone = 120 + (int) (Math.random() * 25);
+            g.setColor(new Color(tone, (int) (tone * 0.72), (int) (tone * 0.45)));
+            g.fillRect(0, y, 700, 4);
+        }
+
+        // Draw decorative borders of a shop signboard
+        g.setColor(new Color(60, 40, 20));
+        g.setStroke(new BasicStroke(6));
+        g.drawRect(20, 20, 660, 410);
+
+        g.dispose();
+        ImageIO.write(img, "png", targetFile);
     }
 }

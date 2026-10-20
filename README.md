@@ -97,6 +97,21 @@ sinhala-akuru-ai/
 
 ---
 
+## 🎨 Intact Image Styling & Inpainting
+
+You can take **any existing image** (e.g. a storefront, signboard, blank mug, street wall, t-shirt, or poster), and the model will inpaint the stylized Sinhala text onto it while keeping the rest of the original photo **100% intact**:
+
+### Supported Graphical Styles
+* `neon_glow`: Cyberpunk / night illuminated sign with multi-radius bloom.
+* `metallic_gold`: 3D embossed gold/brass with bevel highlights and drop shadows.
+* `wood_carved`: Deep-carved wooden sign with shadow and grain blending.
+* `painted_sign`: Acrylic / oil street paint with subtle edge texture.
+* `chalk`: Dusty white / colored chalk texture for cafe boards.
+* `clean_white` / `clean_black`: Crisp modern solid typography.
+* `color_hex`: Custom hex color code (e.g. `#00FFFF`, `#FF9900`).
+
+---
+
 ## 🚀 Quickstart & Workflow
 
 ### Prerequisites
