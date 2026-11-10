@@ -1,163 +1,139 @@
 # sinhala-akuru-ai
 
-A pipeline and web tool for rendering accurate, stylized Sinhala typography onto images.
+Render accurate, stylized Sinhala text onto any image — without it turning into broken squiggles.
 
 ---
 
-## Overview
+## Why this exists
 
-Image generation models (Stable Diffusion, Midjourney, FLUX) consistently fail at rendering South Asian scripts like Sinhala. They misplace vowel signs (*pilli*), detach the *kombuwa* (ෙ), and scramble consonant conjuncts (*rakaransaya*, *bandi akuru*) into broken squiggles.
+Every popular image model (Stable Diffusion, FLUX, Midjourney) fails badly at Sinhala. It's not a minor rendering glitch — vowel signs (*pilli*) end up detached, the *kombuwa* gets swapped to the wrong side, and consonant conjuncts (*rakaransaya*, *bandi akuru*) come out as random noise. The models simply weren't trained on enough Sinhala data to ever get this right on their own.
 
-**sinhala-akuru-ai** solves this by separating text shaping from image synthesis:
+The fix here isn't to hope a bigger model learns Sinhala better. It's to take text rendering out of the model's hands entirely:
 
-1. **Deterministic font shaping:** Uses native font shaping engines (HarfBuzz / Windows CTL via `Nirmala UI` and `Noto Sans Sinhala`) to produce mathematically exact glyph masks. Ligatures, diacritics, and left-reordered vowels are placed correctly before any image processing touches them.
-2. **Intact image inpainting:** Blends stylized Sinhala text onto an existing photo (storefront sign, wooden board, street wall, mug, t-shirt) while keeping every other pixel of the original photo untouched.
-3. **Diffusion conditioning pipeline:** Includes training scripts and synthetic dataset generators for fine-tuning ControlNet adapters with region-weighted loss.
+1. **Font shaping handles the text.** HarfBuzz / Windows CTL (`Nirmala UI`, `Noto Sans Sinhala`) produce pixel-exact glyph masks — ligatures, diacritics, and left-reordered vowels placed correctly before diffusion touches anything.
+2. **Inpainting handles the image.** The styled Sinhala text is blended onto your photo (storefront, sign, t-shirt, mug, wall) while keeping every other pixel of the original untouched.
+3. **Training pipeline included.** Scripts for generating synthetic paired datasets and fine-tuning a ControlNet adapter with region-weighted loss, if you want to push further.
 
 ---
 
 ## Web Studio
 
-The easiest way to use the project is through the built-in browser UI.
+The quickest way in. No API calls needed.
 
 ```bash
 cd ml-engine
 py -m uvicorn server.inference_server:app --port 8000
 ```
 
-Open **[http://localhost:8000](http://localhost:8000)** in your browser to:
-- Upload any image (or test with the built-in storefront sample).
-- Type any Sinhala Unicode text (e.g. `ආයුබෝවන්`, `ශ්‍රී ලංකා`, `තේ කඩේ`).
-- Select a visual style and download the resulting high-res image.
+Open **[http://localhost:8000](http://localhost:8000)**, upload an image, type your Sinhala text, pick a style, download the result.
 
 ---
 
-## Visual Styles
+## Styles
 
-| Style | Description |
+| Style | What it looks like |
 | :--- | :--- |
-| `neon_glow` | Multi-pass glow and bloom with a bright core for cyberpunk or night signs |
-| `wood_carved` | Engraved wood sign with chiseled shadows and grain highlights |
-| `metallic_gold` | 3D beveled gold/brass finish with upper-left specular highlights |
-| `painted_sign` | Acrylic/oil paint texture blended onto wall or board surfaces |
-| `chalk` | Soft chalk texture for restaurant and cafe blackboards |
-| `clean_white` / `clean_black` | Crisp solid vector text |
-| `color_hex` | Custom hex color code (e.g. `#00FFFF`, `#FFB300`) |
+| `neon_glow` | Multi-pass bloom + bright core — good for night scenes and signs |
+| `wood_carved` | Engraved wood look with chiseled shadows and grain |
+| `metallic_gold` | Beveled gold/brass with specular highlight |
+| `painted_sign` | Paint texture blended onto wall or board |
+| `chalk` | Soft chalk on dark background — cafe/restaurant boards |
+| `clean_white` / `clean_black` | Crisp solid text, no effects |
+| `color_hex` | Any hex color you want (`#00FFFF`, `#FFB300`, etc.) |
 
 ---
 
-## Project Structure
+## Project Layout
 
-```text
+```
 sinhala-akuru-ai/
-├── app-client/                  # Java client module (native font shaping)
-│   ├── build.gradle
+├── app-client/                  # Java module — native font shaping
 │   └── src/main/java/com/sinhalagen/
-│       ├── MainApp.java         # CLI test entrypoint
 │       ├── glyph/
-│       │   └── SinhalaGlyphRenderer.java  # HarfBuzz/Uniscribe glyph rasterizer
+│       │   └── SinhalaGlyphRenderer.java   # HarfBuzz/Uniscribe rasterizer
 │       └── client/
-│           └── InferenceClient.java       # HTTP client for Python server
-├── ml-engine/                   # Python server, training, and data pipeline
-│   ├── requirements.txt
-│   ├── server/
-│   │   └── inference_server.py  # FastAPI app + browser Studio UI
-│   ├── data_pipeline/
-│   │   ├── generate_synthetic_data.py # Synthetic paired dataset generator
-│   │   └── fonts/               # Bundled Unicode fonts
-│   └── training/
-│       └── train_glyph_lora.py  # ControlNet training with region-weighted loss
-├── build.gradle                 # Root Gradle configuration
-├── settings.gradle
-└── README.md
+│           └── InferenceClient.java        # HTTP client for the Python server
+└── ml-engine/                   # Python server, training, data pipeline
+    ├── server/
+    │   └── inference_server.py  # FastAPI app + browser Studio
+    ├── data_pipeline/
+    │   ├── generate_synthetic_data.py
+    │   └── fonts/
+    └── training/
+        └── train_glyph_lora.py  # ControlNet training with region-weighted loss
 ```
 
 ---
 
-## Setup & Usage
+## Setup
 
-### Requirements
-- **Python 3.10+**
-- **Java 17+ or 21+** (for the Java client module)
-- Windows includes `Nirmala UI` out of the box. On Linux, install `fonts-noto-core`.
+**Requirements:** Python 3.10+, Java 17+. Windows already ships with `Nirmala UI`. On Linux, install `fonts-noto-core`.
 
-### 1. Python Server & Studio
+### Python server
 
-Install requirements:
 ```bash
 cd ml-engine
 pip install -r requirements.txt
-```
-
-Launch the server:
-```bash
 py -m uvicorn server.inference_server:app --host 127.0.0.1 --port 8000
 ```
 
-- Studio UI: `http://localhost:8000`
-- API documentation (Swagger): `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/health`
+- Studio UI → `http://localhost:8000`
+- Swagger docs → `http://localhost:8000/docs`
+- Health check → `http://localhost:8000/health`
 
-### 2. Standalone Java Glyph Engine
+### Java glyph engine (standalone)
 
-You can verify the font shaping engine directly without running the Python server:
+Run this to verify the font shaper works without starting the Python server:
 
 ```powershell
 javac -d bin app-client/src/main/java/com/sinhalagen/glyph/SinhalaGlyphRenderer.java
-java -cp bin com.sinhalagen.glyph.SinhalaGlyphRenderer "ආයුබෝවන් ශ්‍රී ලංකා"
+java -cp bin com.sinhalagen.glyph.SinhalaGlyphRenderer "ජාතික රූපවාහිනී"
 ```
 
-This outputs clean binary glyph masks to `output/sinhala_glyph_mask.png`.
+Outputs a binary glyph mask to `output/sinhala_glyph_mask.png`.
 
-### 3. Synthetic Dataset Generation
-
-To generate paired training samples (glyph masks, bounding boxes, and stylized scene composites):
+### Generate training data
 
 ```bash
 cd ml-engine
 py data_pipeline/generate_synthetic_data.py --samples 1000 --out_dir dataset
 ```
 
-Outputs:
-- `dataset/glyphs/`: 512x512 black-and-white glyph condition maps
-- `dataset/masks/`: Text bounding box masks
-- `dataset/targets/`: Synthetic photo composites
-- `dataset/metadata.jsonl`: Prompt and bbox metadata
+Produces:
+- `dataset/glyphs/` — 512×512 glyph condition maps
+- `dataset/masks/` — bounding box masks
+- `dataset/targets/` — synthetic scene composites
+- `dataset/metadata.jsonl` — prompt + bbox records
 
-### 4. Training ControlNet (Optional)
-
-To train a ControlNet adapter on your generated dataset:
+### Train ControlNet (optional)
 
 ```bash
 cd ml-engine
 py training/train_glyph_lora.py --data_dir dataset --epochs 5 --batch_size 1
 ```
 
-Weights will be saved to `checkpoints/sinhala-glyph-controlnet`.
+Saves weights to `checkpoints/sinhala-glyph-controlnet`.
 
 ---
 
-## API Reference
+## API
 
 ### `POST /generate`
 
-Accepts JSON payloads. Supports raw text or base64 inputs:
-
 ```json
 {
-  "sinhala_text": "ආයුබෝවන් ශ්‍රී ලංකා",
+  "sinhala_text": "ජාතික රූපවාහිනී",
   "style": "neon_glow",
   "color_hex": "#00FFFF",
-  "base_image_base64": "<optional-base64-encoded-image>"
+  "base_image_base64": "<optional>"
 }
 ```
 
-**Response:**
 ```json
 {
   "status": "success",
   "style_applied": "neon_glow",
-  "generated_image_base64": "<base64-output-png>"
+  "generated_image_base64": "<base64-png>"
 }
 ```
 
@@ -165,4 +141,4 @@ Accepts JSON payloads. Supports raw text or base64 inputs:
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)
